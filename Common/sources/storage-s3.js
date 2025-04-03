@@ -48,6 +48,7 @@ const commonDefines = require('./../../Common/sources/commondefines');
 
 const cfgExpSessionAbsolute = ms(config.get('services.CoAuthoring.expire.sessionabsolute'));
 const cfgRequestDefaults = config.get('services.CoAuthoring.requestDefaults');
+const cfgCacheStorage = config.get('storage');
 
 //This operation enables you to delete multiple objects from a bucket using a single HTTP request. You may specify up to 1000 keys.
 const MAX_DELETE_OBJECTS = 1000;
@@ -224,6 +225,13 @@ async function deletePath(storageCfg, strPath) {
   await deleteObjects(storageCfg, list);
 }
 async function getSignedUrlWrapper(ctx, storageCfg, baseUrl, strPath, urlType, optFilename, opt_creationDate) {
+  if (storageCfg.proxyUrlsEnabled === true) {
+    return getSignedProxyUrl(ctx, storageCfg, baseUrl, strPath, urlType, optFilename, opt_creationDate)
+  }
+  return getSignedS3Url(ctx, storageCfg, baseUrl, strPath, urlType, optFilename, opt_creationDate);
+}
+
+async function getSignedS3Url(ctx, storageCfg, baseUrl, strPath, urlType, optFilename, opt_creationDate) {
   const storageUrlExpires = storageCfg.fs.urlExpires;
   let expires = (commonDefines.c_oAscUrlTypes.Session === urlType ? cfgExpSessionAbsolute / 1000 : storageUrlExpires) || 31536000;
   // Signature version 4 presigned URLs must have an expiration date less than one week in the future
@@ -247,8 +255,21 @@ async function getSignedUrlWrapper(ctx, storageCfg, baseUrl, strPath, urlType, o
   // return utils.changeOnlyOfficeUrl(url, strPath, optFilename);
 }
 
+async function getSignedProxyUrl(ctx, storageCfg, baseUrl, strPath, urlType, optFilename, opt_creationDate) {
+  const userFriendlyName = optFilename ? optFilename : path.basename(strPath);
+  let uri = '/' + storageCfg.bucketName + '/' + storageCfg.storageFolderName + '/' + 
+            storageCfg.cacheFolderName + '/'
+             + strPath;
+  if (!uri.endsWith('/' + userFriendlyName)) {
+    uri += '/' + userFriendlyName;
+  }
+  let url = utils.checkBaseUrl(ctx, baseUrl, storageCfg);
+  url += uri;
+  return url;
+}
+
 function needServeStatic() {
-  return false;
+  return cfgCacheStorage.proxyUrlsEnabled;
 }
 
 module.exports = {
@@ -262,5 +283,6 @@ module.exports = {
   deleteObject,
   deletePath,
   getSignedUrl: getSignedUrlWrapper,
+  getSignedS3Url,
   needServeStatic
 };

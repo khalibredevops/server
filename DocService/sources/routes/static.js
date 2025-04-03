@@ -39,7 +39,8 @@ const storage = require('./../../../Common/sources/storage-base');
 const urlModule = require("url");
 const path = require("path");
 const mime = require("mime");
-
+const commonDefines = require('./../../../Common/sources/commondefines');
+const { getSignedS3Url } = require('./../../../Common/sources/storage-s3');
 const cfgStaticContent = config.has('services.CoAuthoring.server.static_content') ? config.get('services.CoAuthoring.server.static_content') : {};
 const cfgCacheStorage = config.get('storage');
 const cfgPersistentStorage = utils.deepMergeObjects({}, cfgCacheStorage, config.get('persistentStorage'));
@@ -58,26 +59,45 @@ function initCacheRouter(cfgStorage, routs) {
       return;
     }
     let rootPath = path.join(folderPath, rout);
-    router.use(`/${bucketName}/${storageFolderName}/${rout}`, (req, res, next) => {
+    router.use(`/${bucketName}/${storageFolderName}/${rout}`, async (req, res, next) => {
       const index = req.url.lastIndexOf('/');
       if ('GET' === req.method && index > 0) {
-        let sendFileOptions = {
-          root: rootPath, dotfiles: 'deny', headers: {
-            'Content-Disposition': 'attachment'
+        try {
+          if (cfgStorage.name === 'storage-s3' && cfgStorage.proxyUrlsEnabled === true) {
+            const realUrl = decodeURI(req.url.substring(1, index));
+            const filename = decodeURIComponent(path.basename(req.url));
+            const signedUrl = await getSignedS3Url(
+              //TODO: check if ctx is correct
+              req.ctx || operationContext.global,
+              cfgStorage,
+              '',
+              realUrl + '/' + filename,
+              commonDefines.c_oAscUrlTypes.Session
+            );
+            res.redirect(signedUrl);
+          } else {
+            let sendFileOptions = {
+              root: rootPath, dotfiles: 'deny', headers: {
+                'Content-Disposition': 'attachment'
+              }
+            };
+            const urlParsed = urlModule.parse(req.url);
+            if (urlParsed && urlParsed.pathname) {
+              const filename = decodeURIComponent(path.basename(urlParsed.pathname));
+              sendFileOptions.headers['Content-Type'] = mime.getType(filename);
+            }
+            const realUrl = decodeURI(req.url.substring(0, index));
+            res.sendFile(realUrl, sendFileOptions, (err) => {
+              if (err) {
+                operationContext.global.logger.error(err);
+                res.status(400).end();
+              }
+            });
           }
-        };
-        const urlParsed = urlModule.parse(req.url);
-        if (urlParsed && urlParsed.pathname) {
-          const filename = decodeURIComponent(path.basename(urlParsed.pathname));
-          sendFileOptions.headers['Content-Type'] = mime.getType(filename);
+        } catch (err) {
+          operationContext.global.logger.error(err);
+          res.status(400).end();
         }
-        const realUrl = decodeURI(req.url.substring(0, index));
-        res.sendFile(realUrl, sendFileOptions, (err) => {
-          if (err) {
-            operationContext.global.logger.error(err);
-            res.status(400).end();
-          }
-        });
       } else {
         res.sendStatus(404);
       }
