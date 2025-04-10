@@ -56,7 +56,7 @@
   "license": {
     "license_file": "/var/www/onlyoffice/documentserver/../Data/license.lic",
     "warning_limit_percents": 70,
-    "packageType": 0
+    "packageType": 1
   },
   "FileConverter": {
     "converter": {
